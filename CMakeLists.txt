@@ -47,16 +47,14 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate messages in the 'msg' folder
  add_message_files(
    FILES
-   MotorCtl.msg
    SoundLoc.msg
  )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+ add_service_files(
+   FILES
+   MotorCtl.srv
+ )
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -101,8 +99,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES middleme
+  INCLUDE_DIRS include
+  LIBRARIES ${PROJECT_NAME}
   CATKIN_DEPENDS message_runtime roscpp rospy std_msgs
 #  DEPENDS system_lib
 )
@@ -114,8 +112,8 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 # include_directories(include)
-include_directories(
-  include/${PROJECT_NAME}
+include_directories(include
+#  include/${PROJECT_NAME}
   ${catkin_INCLUDE_DIRS}
 )
 
@@ -123,7 +121,8 @@ link_directories(lib)
 
 ## Declare a C++ library
  add_library(wiboturn_lib
-   src/wiboutil.cpp
+   src/wiboturn_lib.cpp
+   src/wiboturn.cpp
  )
 
 ## Add cmake target dependencies of the library
@@ -137,10 +136,12 @@ link_directories(lib)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
- add_dependencies(wiboturn ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# add_dependencies(wiboturn ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
- target_link_libraries(wiboturn
+ target_link_libraries(
+   wiboturn
+   wiboturn_lib
    libstm32_ctrl.so
    ${catkin_LIBRARIES}
  )
@@ -160,18 +161,18 @@ link_directories(lib)
 # )
 
 ## Mark executables and/or libraries for installation
-# install(TARGETS middleme middleme_node
-#   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+ install(TARGETS wiboturn 
+   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
 
 ## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+ install(DIRECTORY include/${PROJECT_NAME}/
+   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+   FILES_MATCHING PATTERN "*.h"
+   PATTERN ".git" EXCLUDE
+ )
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 # install(FILES

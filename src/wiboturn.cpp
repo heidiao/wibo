@@ -7,56 +7,51 @@
 #include <unistd.h>
 #include <signal.h>
 #include <iostream>
-
+#include <unistd.h>
+#include <fcntl.h> 
 #include <vector>
 #include <string.h>
 #include <pthread.h>
+#include <termios.h> 
+#include <sys/select.h>
+#include <assert.h>
 
 #include "std_msgs/String.h"
 #include "middleme/SoundLoc.h"
 #include "middleme/MotorCtl.h"
-#include "wiboutil.cpp"
-
-extern "C" 
-{
-    #include   "serial_protocol.h"
-    #include    "util.h"
-    #include   "stepper_motor.h"
-}
-
-#define SOCKFILE "/tmp/soundloc_sockets"
-
-#define BAUDRATE                            B921600
-#define DEVICE                              "/dev/ttyACM0"
-#define BUF_SIZE                            PATH_MAX
-
+#include "middleme/wiboturn_lib.h"
 
 using namespace std;
 
-void wiboSigintHandler(int sig)
+vector<string> splitString(string input, string delimiter)
 {
-    ROS_INFO("Shutdown");
-    unlink(SOCKFILE);
-    ros::shutdown();
-    exit(0);
+    vector<string> output;
+    size_t start = 0;
+    size_t end = 0;
+
+    while (start != string::npos && end != string::npos){
+        start = input.find_first_not_of(delimiter, end);
+        if (start != string::npos){
+            end = input.find_first_of(delimiter, start);
+            if (end != string::npos){
+                output.push_back(input.substr(start, end - start));
+            }else{
+                output.push_back(input.substr(start));
+            }
+        }
+    }
+    return output;
 }
 
-void motorHandler(const middleme::MotorCtl::ConstPtr& msg)
+void *soundLocalizerHandler(void*)
 {
-    //serial_send_command( uart_fd, NULL, 0);
-    // x: -90~90
-    // y: -90~90
 
-    cout <<"x:" << msg->x << ", y:" << msg->y << endl;
-}
-
-void *soundLocalizerHandler(void* sound)
-{
-    ros::Publisher *p_soundloc_pub= (ros::Publisher*)sound;
+    ros::NodeHandle n;
+    ros::Publisher p_soundloc_pub = n.advertise<middleme::SoundLoc>("wiboturn/soundloc", 1000);
 
     // declare socket
     int sock, sockconn, rval;
-    char buf[1024];
+    char buf[BUF_SIZE];
     struct sockaddr_un server;
 
     // 10MHz
@@ -92,7 +87,7 @@ void *soundLocalizerHandler(void* sound)
             perror("accept");
         else do {
             bzero(buf, sizeof(buf));
-            if ((rval = read(sockconn , buf, 1024)) < 0)
+            if ((rval = read(sockconn , buf, BUF_SIZE)) < 0)
                 perror("reading stream message");
             else if (rval == 0){
                 ROS_INFO("Ending socket connection");
@@ -103,7 +98,7 @@ void *soundLocalizerHandler(void* sound)
                     middleme::SoundLoc soundloc_msg;
                     soundloc_msg.timestamp = ros::Time((float)atof(obj[0].c_str()));
                     soundloc_msg.angle = (float)atof(obj[1].c_str());
-                    p_soundloc_pub->publish(soundloc_msg);
+                    p_soundloc_pub.publish(soundloc_msg);
                     cout << "time:" << soundloc_msg.timestamp <<", angle:"<< soundloc_msg.angle <<endl;
                 }
             }
@@ -115,33 +110,18 @@ void *soundLocalizerHandler(void* sound)
     close(sock);
 }
 
-
-
 int main(int argc, char **argv)
 {
+    ros::init(argc, argv, "wiboturn");
+
+    // sound localizer thread, asynchronous .
     pthread_t threadSoundLoc;
-    ros::init(argc, argv, "wiboturn", ros::init_options::NoSigintHandler);
-    ros::NodeHandle n;
+    pthread_create( &threadSoundLoc, NULL, soundLocalizerHandler, (void*)NULL);
 
-    //MultiThreadedSpinner is a blocking spinner, similar to ros::spin()
-    ros::MultiThreadedSpinner spinner(2);
+    // start Motor Service
+    wiboturn::WiboTurnNode wnode;
 
-    //Subscriber motor control
-    ros::Subscriber motor_sub = n.subscribe("wiboturn/motorctl", 1000, motorHandler);
-
-    // Publisher sound localizer
-    ros::Publisher soundloc_pub = n.advertise<middleme::SoundLoc>("wiboturn/soundloc", 1000);
-
-    // pthread create Sound localizer
-    pthread_create( &threadSoundLoc, NULL, soundLocalizerHandler, (void*)& soundloc_pub);
-
-    // handle CTRL+C interrupt
-    signal(SIGINT, wiboSigintHandler);
-
-    // uart 
-
-    //motor callbacks will be called, through a call to ros::shutdown() or a Ctrl-C.
-    spinner.spin();
     ros::waitForShutdown();
+
     return 0;
 }

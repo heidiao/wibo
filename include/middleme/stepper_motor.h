@@ -3,9 +3,15 @@
 
 #include	"def.h"
 
-#define	SPD									0.72	// steps per degree
-#define	deg2step(d)							( (d) / SPD )
 #define	FREQ								1000000	// 1Mhz
+
+#define	ID_HORI								0x00
+#define	ID_VERT								0x01
+
+#define	SPD_HORI							0.72	// steps per degree (R1 ON, STEP 0)
+#define	DIFF_HORI							24.5	// gear ratio
+#define	SPD_VERT							0.0288	// steps per degree (R1 ON, STEP 8)
+#define	DIFF_VERT							1		// gear ratio
 
 // limitation for Orientation Motor
 #define	MIN_PERIOD							100		// us
@@ -25,7 +31,8 @@
 #define CMD_ID_STOP_DATA_STREAMING			0x09
 
 #define	CMD_ID_MOTOR_DRIVE					0x10
-#define	CMD_ID_MOTOR_GET_STATE				0x11
+#define	CMD_ID_MOTOR_STOP					0x11
+#define	CMD_ID_MOTOR_GET_STATE				0x12
 #define	CMD_ID_MOTOR_TEST					0x1f
 
 #define	CMD_ID_REPLY_ADD					0x80
@@ -41,13 +48,13 @@ typedef enum {
 #pragma pack(push)
 #pragma pack(1)
 #define	DEFINE_CMD_START	typedef struct __attribute__((__packed__)) {
-#define	DEFINE_CMD_END(x)	uint8_t	checksum;	\
-							} x
+#define	DEFINE_CMD_END(x)	} x
+							
 DEFINE_CMD_START
 	uint8_t		dev_addr;
 	uint8_t		sender;
 	uint8_t		cmd;
-DEFINE_CMD_END(cmd_short);
+DEFINE_CMD_END(cmd_short_t);
 
 DEFINE_CMD_START
 	uint8_t		dev_addr;
@@ -55,7 +62,7 @@ DEFINE_CMD_START
 	uint8_t		cmd;
 	uint32_t	sensors_enabled;
 	uint32_t	data_tx_period;	
-DEFINE_CMD_END(cmd_start_data_streaming);
+DEFINE_CMD_END(cmd_start_data_streaming_t);
 
 DEFINE_CMD_START
 	uint8_t		dev_addr;
@@ -65,7 +72,7 @@ DEFINE_CMD_START
 	dir_t		direction:8;
 	uint16_t	steps;
 	uint16_t	period_start;		// in us
-	uint16_t	period_end;		// in us
+	uint16_t	period_end;			// in us
 	uint16_t	period_accel;		// in us
 DEFINE_CMD_END(cmd_motor_drive_t);
 
@@ -85,23 +92,36 @@ DEFINE_CMD_START
 	uint8_t		sender;
 	uint8_t		cmd;
 	uint8_t		id;
+	uint16_t	period_stop;
+	uint16_t	period_accel;
+DEFINE_CMD_END(cmd_motor_stop_t);
+
+DEFINE_CMD_START
+	uint8_t		dev_addr;
+	uint8_t		sender;
+	uint8_t		cmd;
+	uint8_t		id;
 DEFINE_CMD_END(cmd_motor_get_state_t);
+
 #pragma pack(pop)
 
-extern cmd_short				CMD_PING;
-extern cmd_short				CMD_READ_PRES_STRING;
-extern cmd_short				CMD_CHECK_MODE_SUPPORT;
-extern cmd_short				CMD_STOP_DATA_STREAMING;
-extern cmd_start_data_streaming	CMD_START_DATA_STREAMING;
-extern cmd_motor_drive_t		CMD_MOTOR_DRIVE;
-extern cmd_motor_get_state_t	CMD_MOTOR_GET_STATE;
-extern cmd_motor_test_t			CMD_MOTOR_TEST;
-
 uint32_t cmd_motor_drive_time( cmd_motor_drive_t *cmd );
-cmd_motor_drive_t* cmd_motor_drive_verify( cmd_motor_drive_t *cmd );
 
-// generate and verify compond literal (on stack)
-#define gen_cmd_motor_drive( id, direction, steps, period_start, period_end, period_accel )	\
-	*cmd_motor_drive_verify( &(cmd_motor_drive_t) { DEV_ADDR, SENDER_UART, CMD_ID_MOTOR_DRIVE, id, direction, steps, period_start, period_end, period_accel } )
+typedef struct {
+	uint8_t		id;
+	uint32_t	freq;
+	double		spd;		// steps per degree
+} motor_t;
+
+extern motor_t hori, vert;
+
+uint16_t motor_deg2step( motor_t *motor, int degree );
+double motor_step2deg( motor_t *motor, uint16_t step );
+uint16_t motor_rpm2period( motor_t *motor, double rpm );
+cmd_motor_drive_t* motor_gen_cmd_motor_drive( motor_t *motor, cmd_motor_drive_t *cmd, dir_t direction, uint16_t steps, uint16_t period_start, uint16_t period_end, uint16_t period_accel );
+
+// angle in degree
+// accel_time in milli-second
+cmd_motor_drive_t* motor_gen_cmd_motor_drive_rpm( motor_t *motor, cmd_motor_drive_t *cmd, dir_t direction, int degree, double rpm_start, double rpm_end, int accel_time );
 
 #endif
