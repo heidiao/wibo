@@ -113,7 +113,6 @@ catkin_package(
 ## Your package locations should be listed before other locations
 # include_directories(include)
 include_directories(include
-#  include/${PROJECT_NAME}
   ${catkin_INCLUDE_DIRS}
 )
 
@@ -122,7 +121,6 @@ link_directories(lib)
 ## Declare a C++ library
  add_library(wiboturn_lib
    src/wiboturn_lib.cpp
-   src/wiboturn.cpp
  )
 
 ## Add cmake target dependencies of the library
@@ -132,6 +130,8 @@ link_directories(lib)
 
 ## Declare a C++ executable
  add_executable(wiboturn src/wiboturn.cpp)
+ add_executable(wiboturn_demo src/wiboturn_demo.cpp)
+ add_executable(wiboturn_test src/wiboturn_test.cpp)
 
 
 ## Add cmake target dependencies of the executable
@@ -139,6 +139,15 @@ link_directories(lib)
 # add_dependencies(wiboturn ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
+ target_link_libraries(
+   wiboturn_test
+   ${catkin_LIBRARIES}
+ )
+ 
+ target_link_libraries(
+   wiboturn_demo
+   ${catkin_LIBRARIES}
+ )
  target_link_libraries(
    wiboturn
    wiboturn_lib
@@ -161,7 +170,7 @@ link_directories(lib)
 # )
 
 ## Mark executables and/or libraries for installation
- install(TARGETS wiboturn 
+ install(TARGETS wiboturn wiboturn_demo wiboturn_test
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

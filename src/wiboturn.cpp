@@ -79,6 +79,8 @@ void *soundLocalizerHandler(void*)
     listen(sock, 1);
 
     ROS_INFO("Waiting for Sound localizer socket...");
+    ROS_INFO("  1) Open another terminal");
+    ROS_INFO("  2) Execute: java -jar Soundlocalizer.jar");
     while (ros::ok())
     {
         // Listen socket connection

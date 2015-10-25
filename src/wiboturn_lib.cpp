@@ -124,7 +124,7 @@ namespace wiboturn {
             perror("apply config");
             exit(-1);
         }
-        ROS_INFO("UART Successfully");
+        ROS_INFO("Initial UART [%s] Successfully", DEVICE);
     }
 
     bool WiboTurnNode::readMotorResult(int compare_count, float *res_x, float *res_y, int *res_status)
@@ -194,8 +194,6 @@ namespace wiboturn {
         int compare_count=0;
         float x,y;
 
-        cout << "motorHandler()"<< endl;
-
         // Iniital 
         cmd_motor_drive_t cmd;
         dir_t dir_x, dir_y;
@@ -212,7 +210,7 @@ namespace wiboturn {
                 dir_x = (x>0)?CW:CCW;
                 dir_y = (y>0)?CW:CCW;
 
-                cout << "CURRENT_xy:(" << current_x << ", "<< current_y<< " ), xy("<< x <<","<<y<<")"<< endl;
+                cout << "CURRENT_XY:(" << current_x << ", "<< current_y<< " ), XY("<< x <<","<<y<<")"<< endl;
                 if(abs(x)!=0 ){
                     serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, dir_x, motor_deg2step(&hori, abs(x)), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
                     compare_count+=1;
@@ -235,7 +233,7 @@ namespace wiboturn {
                 dir_x = (x>0)?CW:CCW;
                 dir_y = (y>0)?CW:CCW;
 
-                cout << "CURRENT_xy:(" << current_x << ", "<< current_y<< " ), xy("<< x <<","<<y<<")"<< endl;
+                cout << "CURRENT_XY:(" << current_x << ", "<< current_y<< " ), XY("<< x <<","<<y<<")"<< endl;
                 if(abs(x)!=0 ){
                     serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, dir_x, motor_deg2step(&hori, abs(x)), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
                     compare_count+=1;
