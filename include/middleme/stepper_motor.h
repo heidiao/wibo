@@ -33,6 +33,7 @@
 #define	CMD_ID_MOTOR_DRIVE					0x10
 #define	CMD_ID_MOTOR_STOP					0x11
 #define	CMD_ID_MOTOR_GET_STATE				0x12
+#define	CMD_ID_MOTOR_REPORT_SENSOR			0x18
 #define	CMD_ID_MOTOR_TEST					0x1f
 
 #define	CMD_ID_REPLY_ADD					0x80

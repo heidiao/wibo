@@ -8,6 +8,7 @@ using namespace std;
 bool lock = false;
 float x = 0;
 
+
 ros::Subscriber sub;
 ros::ServiceClient client;
 
@@ -22,11 +23,11 @@ void soundMotorAction(float x)
         ROS_INFO("status: %d, x:%f, y:%f\n", (int)srv.response.status, (float)srv.response.x_current, (float)srv.response.y_current);
     else
         ROS_ERROR("Failed to call service motorctl");
+    sleep(2); //filter noise when the motor driving.
 }
 
 void soundCallback(const middleme::SoundLoc::ConstPtr& msg)
 {
-    ROS_INFO("sound callback angle: %f", msg->angle);
     x = msg->angle;
 }
 

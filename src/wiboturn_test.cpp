@@ -44,11 +44,11 @@ int main(int argc, char ** argv)
 
         switch(input[0])
         {
-            case '0':
-            case '1':
+            case '0': //Calibration
+            case '1': //Reset to default angle
                 motorHandler(atoi(input.c_str()), 0, 0);
                 break;
-            case '2':
+            case '2': //Drive
                 cout << "x (default 0):";
                 getline(cin, x);
                 cout << "y (default 0):";
