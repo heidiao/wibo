@@ -1,21 +1,9 @@
-#ifndef	__MOTOR_H
-#define	__MOTOR_H
+#ifndef	__STEPPER_MOTOR_H
+#define	__STEPPER_MOTOR_H
 
 #include	"def.h"
 
 #define	FREQ								1000000	// 1Mhz
-
-#define	ID_HORI								0x00
-#define	ID_VERT								0x01
-
-#define	SPD_HORI							0.72	// steps per degree (R1 ON, STEP 0)
-#define	DIFF_HORI							24.5	// gear ratio
-#define	SPD_VERT							0.0288	// steps per degree (R1 ON, STEP 8)
-#define	DIFF_VERT							1		// gear ratio
-
-// limitation for Orientation Motor
-#define	MIN_PERIOD							100		// us
-#define	MIN_TR								20		// ms/KHz
 
 #define	DEV_ADDR							50
 
@@ -23,22 +11,28 @@
 #define SENDER_USB							0x02
 #define	SENDER_SPI							0x03
 
-#define	CMD_ID_PING							0x01
-#define CMD_ID_READ_PRES_STRING				0x02
-#define	CMD_ID_NACK							0x03
-#define CMD_ID_CHECK_MODE_SUPPORT			0x04
-#define CMD_ID_START_DATA_STREAMING			0x08
-#define CMD_ID_STOP_DATA_STREAMING			0x09
+#define	CMD_PING							0x01
+#define CMD_READ_PRES_STRING				0x02
+#define	CMD_NACK							0x03
+#define CMD_CHECK_MODE_SUPPORT				0x04
+#define CMD_START_DATA_STREAMING			0x08
+#define CMD_STOP_DATA_STREAMING				0x09
 
-#define	CMD_ID_MOTOR_DRIVE					0x10
-#define	CMD_ID_MOTOR_STOP					0x11
-#define	CMD_ID_MOTOR_GET_STATE				0x12
-#define	CMD_ID_MOTOR_REPORT_SENSOR			0x18
-#define	CMD_ID_MOTOR_TEST					0x1f
+#define	CMD_MOTOR_DRIVE						0x10
+#define	CMD_MOTOR_STOP						0x11
+#define	CMD_MOTOR_GET_STATE					0x12
+#define	CMD_MOTOR_REPORT_SENSOR				0x18
+#define	CMD_MOTOR_TEST						0x1f
 
-#define	CMD_ID_REPLY_ADD					0x80
+#define	CMD_REPLY_ADD						0x80
 
 #define	PRESENTATION_STRING					"MEMS shield demo"
+
+typedef enum {
+	ID_HORI,
+	ID_VERT,
+	ID_MAX
+} ident_t;
 
 typedef enum {
 	CCW = -1,	// counter clockwise
@@ -69,7 +63,7 @@ DEFINE_CMD_START
 	uint8_t		dev_addr;
 	uint8_t		sender;
 	uint8_t		cmd;
-	uint8_t		id;
+	ident_t		id:8;
 	dir_t		direction:8;
 	uint16_t	steps;
 	uint16_t	period_start;		// in us
@@ -81,7 +75,7 @@ DEFINE_CMD_START
 	uint8_t		dev_addr;
 	uint8_t		sender;
 	uint8_t		cmd;
-	uint8_t		id;
+	ident_t		id:8;
 	uint8_t		pls;
 	uint8_t		dir;
 	uint8_t		awo;
@@ -92,7 +86,7 @@ DEFINE_CMD_START
 	uint8_t		dev_addr;
 	uint8_t		sender;
 	uint8_t		cmd;
-	uint8_t		id;
+	ident_t		id:8;
 	uint16_t	period_stop;
 	uint16_t	period_accel;
 DEFINE_CMD_END(cmd_motor_stop_t);
@@ -101,7 +95,7 @@ DEFINE_CMD_START
 	uint8_t		dev_addr;
 	uint8_t		sender;
 	uint8_t		cmd;
-	uint8_t		id;
+	ident_t		id:8;
 DEFINE_CMD_END(cmd_motor_get_state_t);
 
 #pragma pack(pop)
@@ -114,7 +108,8 @@ typedef struct {
 	double		spd;		// steps per degree
 } motor_t;
 
-extern motor_t hori, vert;
+extern motor_t pseudo_hori, pseudo_vert;
+extern motor_t wibo_hori, wibo_vert;
 
 uint16_t motor_deg2step( motor_t *motor, int degree );
 double motor_step2deg( motor_t *motor, uint16_t step );

@@ -84,6 +84,9 @@ namespace wiboturn {
             STEP_NG=-1 
         };
 
+        motor_t *hori;
+        motor_t *vert;
+
         int uart_fd;
         motor_period  x_per;
         motor_period  y_per;

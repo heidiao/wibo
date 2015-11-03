@@ -1,4 +1,5 @@
 #include <iostream>
+#include <signal.h>
 #include "ros/ros.h"
 #include "middleme/MotorCtl.h"
 
@@ -23,9 +24,20 @@ void motorHandler(int action, float x, float y)
     }
 }
 
+float RandomNumber(float Min, float Max)
+{
+    return ((float(rand()) / float(RAND_MAX)) * (Max - Min)) + Min;
+}
+
+void intHandler(int sig) {
+    motorHandler(1, 0, 0);
+    exit(0);
+}
+
 int main(int argc, char ** argv)
 {
     string input, x, y = "";
+    float rx, ry;
     ros::init(argc, argv, "wiboturn_test");
     ros::NodeHandle n;
     srv_client = n.serviceClient<middleme::MotorCtl>("wiboturn/motorctl");
@@ -37,6 +49,7 @@ int main(int argc, char ** argv)
             cout << "[0] Calibration" << endl;
             cout << "[1] Reset to default angle" << endl;
             cout << "[2] Drive" << endl;
+            cout << "[3] Random motor for test" << endl;
             cout << "[q] Exit" << endl;
             cout << "Input number:";
             getline(cin, input);
@@ -55,12 +68,21 @@ int main(int argc, char ** argv)
                 getline(cin, y);
                 motorHandler(atoi(input.c_str()), atof(x.c_str()), atof(y.c_str()));
                 break;
+            case '3':
+                signal(SIGINT, intHandler);
+                while(1){
+                    rx = RandomNumber(-90, 90);
+                    ry = RandomNumber(-15, 40);
+                    motorHandler(2, rx, ry);
+                }
+                break; 
             case 'q':
                 goto exit;
                 break;
         }
     }
 exit:
+    motorHandler(1, 0, 0);
     exit(0);
     return 0;
 }

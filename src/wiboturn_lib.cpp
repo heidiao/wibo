@@ -23,7 +23,6 @@
 
 using namespace std;
 namespace wiboturn {
-
     /**
     * Constructor 
     * convert rpm to period value
@@ -33,12 +32,16 @@ namespace wiboturn {
         current_x(0),
         current_y(0)
     {
+
+        hori = &pseudo_hori;
+        vert = &pseudo_vert;
+
         //MultiThreadedSpinner is a blocking spinner, similar to ros::spin()
         ros::MultiThreadedSpinner spinner(2);
 
         uart_init();
-        x_per = motor_convert(&hori, RPM_START, RPM_END, ACCEL_TIME);
-        y_per = motor_convert(&vert, RPM_START, RPM_END, ACCEL_TIME);
+        x_per = motor_convert(hori, RPM_START, RPM_END, ACCEL_TIME);
+        y_per = motor_convert(vert, RPM_START, RPM_END, ACCEL_TIME);
 
         //Service motor control
         motor_service = nh_.advertiseService("motorctl", &WiboTurnNode::motorHandler, this);
@@ -161,6 +164,7 @@ namespace wiboturn {
         bool stop_x=false, stop_y=false;
         uint8_t result[BUF_SIZE+1];
         struct timeval timeout;
+        uint16_t real_steps;
         fd_set fds;
 
         timeout.tv_sec = 3; //timeout 3 second
@@ -177,9 +181,10 @@ namespace wiboturn {
             if( retval>0 ) {
                 if(serial_read_message( uart_fd, result, BUF_SIZE ) >0){
                     if( result[0]==SENDER_UART && result[1]==DEV_ADDR ) {
-                        switch(result[2]-CMD_ID_REPLY_ADD){
+                        real_steps=0;
+                        switch(result[2]-CMD_REPLY_ADD){
                             // motor command result
-                            case CMD_ID_MOTOR_DRIVE:
+                            case CMD_MOTOR_DRIVE:
                                 if(result[3] ==0){
                                     status = STEP_NG;
                                     ROS_ERROR("READ: Fail, ret = %d\n",result[3]);
@@ -189,16 +194,16 @@ namespace wiboturn {
                                 }
                                 break;
                             // motor drive is finished
-                            case CMD_ID_MOTOR_STOP:
-                                if( result[4] ){
+                            case CMD_MOTOR_STOP:
+                                real_steps = deserialize( result+4, 2 );
+                                if( real_steps ){
                                     ok_count+=1;
-                                    ROS_INFO("READ: Finished, id=%d\n", result[3]);
+                                    ROS_INFO("READ: Finished, id=%d, real_steps=%d\n", result[3], real_steps);
                                 }
                                 break;
 
-#if 0
                             // receive sensor
-                            case CMD_ID_MOTOR_REPORT_SENSOR:
+                            case CMD_MOTOR_REPORT_SENSOR:
                                 ROS_INFO( "READ: Sensor, id = %d, sensor = %d, steps = %d\n", \
                                              result[3], result[4], deserialize( result+5, 2 ) );
                                 // x sensor
@@ -231,7 +236,6 @@ namespace wiboturn {
                                     stop_y=true;
                                 }
                                 break;
-#endif
                         }
 
                         //read x, y is done 
@@ -297,11 +301,11 @@ namespace wiboturn {
 
 #if 0
                 if(current_x < L_ANGLE){
-                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, CW, motor_deg2step(&hori, CALIBRATION_X), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CW, motor_deg2step(hori, CALIBRATION_X), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
                     compare_count+=1;
                 }
                 //if(current_y < UP_ANGLE){
-                //    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &vert, &cmd, CW, motor_deg2step(&vert, CALIBRATION_Y), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
+                //    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( vert, &cmd, CW, motor_deg2step(vert, CALIBRATION_Y), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
                 //    compare_count+=1;
                 //}
                 if(compare_count>0){
@@ -310,10 +314,10 @@ namespace wiboturn {
                 }
 
                 if(current_x!=0){
-                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, CCW, motor_deg2step(&hori, L_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, L_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
                     compare_count+=1;
                 }
-                //serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, CCW, motor_deg2step(&hori, UP_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+                //serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, UP_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
                 //compare_count+=1;
 
                 current_x=0;
@@ -349,13 +353,13 @@ namespace wiboturn {
         if(abs(x)>=1 ){
             dir_x = (x>0)?CW:CCW;
             ROS_INFO("SEND: x=%f", x);
-            serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &hori, &cmd, dir_x, motor_deg2step(&hori, abs(x)), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+            serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, dir_x, motor_deg2step(hori, abs(x)), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
             compare_count+=1;
         }
         if(abs(y)>=1){
             dir_y = (y>0)?CW:CCW;
             ROS_INFO("SEND: y=%f", y);
-            serial_send_command( uart_fd, motor_gen_cmd_motor_drive( &vert, &cmd, dir_y, motor_deg2step(&vert, abs(y)), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
+            serial_send_command( uart_fd, motor_gen_cmd_motor_drive( vert, &cmd, dir_y, motor_deg2step(vert, abs(y)), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
             compare_count+=1;
         }
 
