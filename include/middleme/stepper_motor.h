@@ -11,6 +11,7 @@
 #define SENDER_USB							0x02
 #define	SENDER_SPI							0x03
 
+/**********  GENERIC  CMD  (0x00 - 0x0F)  **********/
 #define	CMD_PING							0x01
 #define CMD_READ_PRES_STRING				0x02
 #define	CMD_NACK							0x03
@@ -18,13 +19,44 @@
 #define CMD_START_DATA_STREAMING			0x08
 #define CMD_STOP_DATA_STREAMING				0x09
 
+/**********  MOTOR  CMD  (0x00 - 0x0F)  **********/
 #define	CMD_MOTOR_DRIVE						0x10
 #define	CMD_MOTOR_STOP						0x11
 #define	CMD_MOTOR_GET_STATE					0x12
 #define	CMD_MOTOR_REPORT_SENSOR				0x18
 #define	CMD_MOTOR_TEST						0x1f
 
+/******** ENVIRONMENTAL  CMD  (0x60 - 0x6F)  ********/
+#define CMD_LPS25H_INIT						0x60
+#define CMD_LPS25H_READ						0x61
+#define CMD_HTS221_INIT						0x62
+#define CMD_HTS221_READ						0x63
+
+/******** INERTIAL  CMD  (0x70 - 0x/7F)  ********/
+#define CMD_LSM9DS1_INIT					0x70
+#define CMD_LSM9DS1_9AXES_READ				0x71
+#define CMD_LSM9DS1_AHRS_READ				0x72
+#define CMD_LSM9DS1_ACC_READ				0x73
+#define CMD_LSM9DS1_GYR_READ				0x74
+#define CMD_LSM9DS1_MAG_READ				0x75
+#define CMD_LSM6DS0_INIT					0x76
+#define CMD_LSM6DS0_ACC_READ				0x77
+#define CMD_LSM6DS0_GYR_READ				0x78
+#define CMD_LSM6DS0_6AXES_READ				0x79
+#define CMD_LIS3MDL_INIT					0x7A
+#define CMD_LIS3MDL_READ					0x7B
+#define CMD_SF_INIT							0x7C
+#define CMD_SF_DATA							0x7D
+
 #define	CMD_REPLY_ADD						0x80
+
+#define	SENSOR_PRESSURE						0x01
+#define	SENSOR_TEMPERATURE					0x02
+#define	SENSOR_HUMIDITY						0x04
+#define	SENSOR_UV							0x08
+#define	SENSOR_ACCELEROMETER				0x10
+#define	SENSOR_GYROSCOPE					0x20
+#define	SENSOR_MAGNETIC						0x40
 
 #define	PRESENTATION_STRING					"MEMS shield demo"
 
@@ -103,7 +135,7 @@ DEFINE_CMD_END(cmd_motor_get_state_t);
 uint32_t cmd_motor_drive_time( cmd_motor_drive_t *cmd );
 
 typedef struct {
-	uint8_t		id;
+	ident_t		id;
 	uint32_t	freq;
 	double		spd;		// steps per degree
 } motor_t;

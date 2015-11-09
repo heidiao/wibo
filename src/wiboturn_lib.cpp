@@ -1,52 +1,229 @@
 #include "ros/ros.h"
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sstream>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <signal.h>
-#include <iostream>
-#include <unistd.h>
-#include <fcntl.h> 
-#include <vector>
-#include <string.h>
-#include <pthread.h>
-#include <termios.h> 
-#include <sys/select.h>
-#include <assert.h>
-
-#include "std_msgs/String.h"
-#include "middleme/SoundLoc.h"
-#include "middleme/MotorCtl.h"
+#include <errno.h>
 #include "middleme/wiboturn_lib.h"
 
 using namespace std;
+
 namespace wiboturn {
     /**
     * Constructor 
-    * convert rpm to period value
+    * Convert rpm to period value
+    * Initial ROS service and thread
     */
     WiboTurnNode::WiboTurnNode():
         nh_("~"),
         current_x(0),
-        current_y(0)
+        current_y(0), 
+        hori(&pseudo_hori),
+        vert(&pseudo_vert)
     {
-
-        hori = &pseudo_hori;
-        vert = &pseudo_vert;
-
-        //MultiThreadedSpinner is a blocking spinner, similar to ros::spin()
-        ros::MultiThreadedSpinner spinner(2);
-
+        // Initial UART device
         uart_init();
+
         x_per = motor_convert(hori, RPM_START, RPM_END, ACCEL_TIME);
         y_per = motor_convert(vert, RPM_START, RPM_END, ACCEL_TIME);
 
-        //Service motor control
+        //Service of motor control
         motor_service = nh_.advertiseService("motorctl", &WiboTurnNode::motorHandler, this);
 
-        spinner.spin();
+        //Service of sound localizer
+        soundloc_service = nh_.advertiseService("soundloc", &WiboTurnNode::soundlocHandler, this);
+
+        sensor_pub = nh_.advertise<middleme::Sensor>("sensor", 1000, this);
+
+        // catching signal interrupt
+        signal(SIGINT, WiboTurnNode::signalIntHandler);
+
+        //socket connection...
+        soundloc_thread = boost::thread(&WiboTurnNode::soundlocSocketServer, this,  boost::ref(sockconn));
+
+        //sensor thread
+        motor_thread = boost::thread(&WiboTurnNode::motorThread, this,  \
+                                            boost::ref(uart_fd), \
+                                            boost::ref(sensor_pub), \
+                                            boost::ref(chk_status), \
+                                            boost::ref(current_x), \
+                                            boost::ref(current_y), \
+                                            boost::ref(stop_x), \
+                                            boost::ref(stop_y)
+                                            );
+
+        ros::spin();
+    }
+
+    /**
+    * Signal interrupt handler, CTRL+C
+    */
+    void WiboTurnNode::signalIntHandler(int sig)
+    {
+        ROS_INFO("%s", __func__);
+        exit(0);
+    }
+
+    void WiboTurnNode::motorThread(int &uart_fd, ros::Publisher &sensor_pub, \
+                                    int &chk_status, \
+                                    float &current_x, \
+                                    float &current_y, \
+                                    bool &stop_x, \
+                                    bool &stop_y)
+    {
+        uint8_t buf[BUF_SIZE+1];
+        char output[BUF_SIZE];
+        int nread;
+
+        cmd_short_t                 cmd_lsm6ds0_init            = { DEV_ADDR, SENDER_UART, CMD_LSM6DS0_INIT };
+        cmd_short_t                 cmd_lis3mdl_init            = { DEV_ADDR, SENDER_UART, CMD_LIS3MDL_INIT };
+        cmd_short_t                 cmd_stop_data_streaming     = { DEV_ADDR, SENDER_UART, CMD_STOP_DATA_STREAMING };
+        cmd_start_data_streaming_t  cmd_start_data_streaming    = { DEV_ADDR, SENDER_UART, CMD_START_DATA_STREAMING, SENSORS_ENABLED, 100 };
+
+       // start data streaming
+        serial_send_command( uart_fd, &cmd_start_data_streaming, sizeof(cmd_start_data_streaming) );
+
+        // init sensors
+        if( SENSORS_ENABLED ) {
+            if( SENSORS_ENABLED & (SENSOR_ACCELEROMETER|SENSOR_GYROSCOPE) ) {
+                serial_send_command( uart_fd, &cmd_lsm6ds0_init, sizeof(cmd_short_t) );
+            }
+            if( SENSORS_ENABLED & SENSOR_MAGNETIC ) {
+                serial_send_command( uart_fd, &cmd_lis3mdl_init, sizeof(cmd_short_t) );
+            }
+        }
+
+        while(1){
+            if((nread = serial_read_message( uart_fd, buf, BUF_SIZE )) >0){
+                if( buf[0]==SENDER_UART && buf[1]==DEV_ADDR ){
+                    bzero(output, sizeof(output));
+                    switch(buf[2]){
+                        case CMD_START_DATA_STREAMING:
+                            // motor command result
+                            if( SENSORS_ENABLED& SENSOR_ACCELEROMETER ){
+                                middleme::Sensor sensor_msg;
+                                sensor_msg.sid = 0;
+                                sensor_msg.x=  deserialize(buf+15,4);
+                                sensor_msg.y= deserialize(buf+19,4);
+                                sensor_msg.z= deserialize(buf+23,4);
+                                sensor_pub.publish(sensor_msg);
+                            }
+                            if( SENSORS_ENABLED & SENSOR_GYROSCOPE ){
+                                middleme::Sensor sensor_msg;
+                                sensor_msg.sid = 1;
+                                sensor_msg.x=  deserialize(buf+27,4);
+                                sensor_msg.y= deserialize(buf+31,4);
+                                sensor_msg.z= deserialize(buf+35,4);
+                                sensor_pub.publish(sensor_msg);
+                            }if( SENSORS_ENABLED & SENSOR_MAGNETIC ){
+                                middleme::Sensor sensor_msg;
+                                sensor_msg.sid = 2;
+                                sensor_msg.x=  deserialize(buf+39,4);
+                                sensor_msg.y= deserialize(buf+43,4);
+                                sensor_msg.z= deserialize(buf+47,4);
+                                sensor_pub.publish(sensor_msg);
+                            }
+                            break;
+
+                        // motor drive is finished
+                        case CMD_MOTOR_STOP|CMD_REPLY_ADD:
+                        case CMD_MOTOR_STOP:
+                            if( deserialize( buf+4, 2 )){
+                                mutex.lock();
+                                chk_status--;
+                                mutex.unlock();
+                            //    sprintf(output, "READ: CMD_MOTOR_STOP Finished, id=%d", buf[3]);
+                            }
+                            break;
+
+                        // receive sensor
+                        case CMD_MOTOR_REPORT_SENSOR|CMD_REPLY_ADD:
+                            sprintf(output, "READ: CMD_MOTOR_REPORT_SENSOR, id = %d, sensor = %d, steps = %d\n", \
+                                         buf[3], buf[4], deserialize( buf+5, 2 ) );
+                            // x sensor is be hited
+                            mutex.lock();
+                            if(buf[3] == 0){
+                                switch(buf[4]){
+                                    case SENSOR_X_LEFT:
+                                        current_x = L_ANGLE;
+                                        stop_x=true;
+                                        break;
+                                    case SENSOR_X_RIGHT:
+                                        current_x = R_ANGLE;
+                                        stop_x=true;
+                                        break;
+                                }
+                            }
+                            //y sensor is be hited
+                            if(buf[3] == 1){
+                                switch(buf[4]){
+                                    case SENSOR_Y_UP:
+                                        current_y = UP_ANGLE;
+                                        break;
+                                    case SENSOR_Y_DOWN:
+                                        current_y = DOWN_ANGLE;
+                                        break;
+                                }
+                                stop_y=true;
+                            }
+                            mutex.unlock();
+                            break;
+                    } //end switch 
+                    if(strlen(output)>0)
+                        cout << COLOR_YELLOW <<  output << COLOR_RESET << endl;
+                }
+            } else if( nread==-1 ) {
+                // read()<0 error
+            } else if( nread==-2 ) {
+                // USB disconnect
+                exit(-1);
+            } else if( nread==-3 ) {
+                // resync or checksum error
+            }
+        } //end while
+    }
+ 
+    /**
+    * sound socket service 
+    * Initial socket service, connect with sound localizer socket client
+    */
+    void WiboTurnNode::soundlocSocketServer(int &sockconn)
+    {
+        // declare socket
+        int sock, rval;
+        struct sockaddr_un server;
+
+        // Initialize socket stream
+        sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock < 0) {
+            perror("opening stream socket");
+            exit(1);
+        }
+        server.sun_family = AF_UNIX;
+        strcpy(server.sun_path, SOCKFILE);
+
+        // Check socket file exists, remove.
+        if (access(SOCKFILE, F_OK ) != -1)
+            unlink(SOCKFILE);
+
+        // Binding stream socket
+        if (bind(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un))) {
+            perror("binding stream socket");
+            exit(1);
+        }
+
+        // Listen 1 connection
+        listen(sock, 1);
+
+        ROS_INFO("Waiting for socket connection...");
+        ROS_INFO("    1) Open another terminal");
+        ROS_INFO("    2) Execute: java -jar Soundlocalizer.jar");
+        while (ros::ok())
+        {
+            // Listen socket connection
+            sockconn = accept(sock, 0, 0);
+            if (sockconn>0){
+                cout <<  "Receive a connect,  sockconn:" << sockconn << endl;
+            }
+            ros::spinOnce();
+        }
+        close(sock);
     }
  
     /**
@@ -153,130 +330,7 @@ namespace wiboturn {
         ROS_INFO("Initial UART [%s] Successfully", DEVICE);
     }
 
-    /**
-    * readMotorResult 
-    * get uart response message
-    * return true if successful, otherwise false
-    */
-    bool WiboTurnNode::readMotorResult(int compare_count, float *res_x, float *res_y, int *res_status)
-    {
-        int retval, status = STEP_START, ok_count = 0;
-        bool stop_x=false, stop_y=false;
-        uint8_t result[BUF_SIZE+1];
-        struct timeval timeout;
-        uint16_t real_steps;
-        fd_set fds;
-
-        timeout.tv_sec = 3; //timeout 3 second
-        timeout.tv_usec = 0;
-
-        FD_ZERO(&fds);
-        FD_SET(uart_fd, &fds);
-
-        bzero(result, sizeof(result));
-
-        // Read current status
-        while(compare_count>0){
-            retval = select( uart_fd+1, &fds, NULL, NULL, &timeout );
-            if( retval>0 ) {
-                if(serial_read_message( uart_fd, result, BUF_SIZE ) >0){
-                    if( result[0]==SENDER_UART && result[1]==DEV_ADDR ) {
-                        real_steps=0;
-                        switch(result[2]-CMD_REPLY_ADD){
-                            // motor command result
-                            case CMD_MOTOR_DRIVE:
-                                if(result[3] ==0){
-                                    status = STEP_NG;
-                                    ROS_ERROR("READ: Fail, ret = %d\n",result[3]);
-                                }else{
-                                    ok_count+=1;
-                                    ROS_INFO("READ: Success, ret = %d\n",result[3]);
-                                }
-                                break;
-                            // motor drive is finished
-                            case CMD_MOTOR_STOP:
-                                real_steps = deserialize( result+4, 2 );
-                                if( real_steps ){
-                                    ok_count+=1;
-                                    ROS_INFO("READ: Finished, id=%d, real_steps=%d\n", result[3], real_steps);
-                                }
-                                break;
-
-                            // receive sensor
-                            case CMD_MOTOR_REPORT_SENSOR:
-                                ROS_INFO( "READ: Sensor, id = %d, sensor = %d, steps = %d\n", \
-                                             result[3], result[4], deserialize( result+5, 2 ) );
-                                // x sensor
-                                if(result[3] == 0){
-                                    switch(result[4]){
-                                        case SENSOR_X_FRONT:
-                                            current_x = 0;
-                                            break;
-                                        case SENSOR_X_LEFT:
-                                            current_x = L_ANGLE;
-                                            stop_x=true;
-                                            break;
-                                        case SENSOR_X_RIGHT:
-                                            current_x = R_ANGLE ;
-                                            stop_x=true;
-                                            break;
-                                    }
-                                }
-     
-                                //y sensor
-                                if(result[3] == 1){
-                                    switch(result[4]){
-                                        case SENSOR_Y_UP:
-                                            current_y = UP_ANGLE;
-                                            break;
-                                        case SENSOR_Y_DOWN:
-                                            current_y = DOWN_ANGLE;
-                                            break;
-                                    }
-                                    stop_y=true;
-                                }
-                                break;
-                        }
-
-                        //read x, y is done 
-                        if(ok_count == compare_count*2){
-                            status = STEP_OK;
-                            if(stop_x || stop_y){
-                                if(stop_x && stop_y)
-                                    status = STEP_STOP;
-                                else if (stop_x)
-                                    status = STEP_STOP_X;
-                                else if (stop_y)
-                                    status = STEP_STOP_Y;
-                            }
-                        }
-                        if(status != STEP_START)
-                            break;
-                    }
-                }
-
-            } else if( retval==0 ){
-                // timeout
-                ROS_ERROR("READ: timeout");
-                break;
-            }
-
-        }
-
-        // set the current angle to service response message
-        *res_x = current_x;
-        *res_y = current_y;
-
-        // return result
-        if(status != STEP_NG){
-            ROS_INFO("RESULT: status: %d, current_xy(%f, %f)\n", status, current_x, current_y);
-            *res_status = status;
-            return true;
-        }else{
-            return false;
-        }
-    }
-
+    
     /**
     * motorHandler
     * set motor to calibration, reset or drive mode
@@ -286,8 +340,17 @@ namespace wiboturn {
              middleme::MotorCtl::Response &res)
     {
         //Declare
-        int compare_count=0, ret;
+        int  ret;
         float x,y;
+        time_t endwait;
+        int seconds = 3; // timeout 3 second.
+
+        endwait = time (NULL) + seconds ;
+        mutex.lock();
+        stop_x = false;
+        stop_y = false;
+        chk_status = 0;
+        mutex.unlock();
 
         // Iniital 
         cmd_motor_drive_t cmd;
@@ -298,32 +361,36 @@ namespace wiboturn {
         {
             // setup motor calibration
             case ACTION_CALIBRATION: 
-
 #if 0
                 if(current_x < L_ANGLE){
                     serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CW, motor_deg2step(hori, CALIBRATION_X), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
-                    compare_count+=1;
+                    chk_status++;
                 }
-                //if(current_y < UP_ANGLE){
-                //    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( vert, &cmd, CW, motor_deg2step(vert, CALIBRATION_Y), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
-                //    compare_count+=1;
-                //}
-                if(compare_count>0){
-                    ret = readMotorResult(compare_count, &res.x_current, &res.y_current, &res.status);
-                    compare_count = 0;
+                if(current_y < UP_ANGLE){
+                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( vert, &cmd, CW, motor_deg2step(vert, CALIBRATION_Y), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
+                    chk_status++;
                 }
 
-                if(current_x!=0){
-                    serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, L_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
-                    compare_count+=1;
+                // wait for finished
+                while(time(NULL) < endwait){
+                    if(chk_status == 0)
+                        break;
                 }
-                //serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, UP_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
-                //compare_count+=1;
+                endwait = time (NULL) + seconds ;
+
+                serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, L_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+                serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, CCW, motor_deg2step(hori, UP_ANGLE), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
+                chk_status=2;
+
+                // wait for finished
+                while(time(NULL) < endwait){
+                    if(chk_status == 0)
+                        break;
+                }
 
                 current_x=0;
-                //current_y=0;
-
-                return readMotorResult(compare_count, &res.x_current, &res.y_current, &res.status);
+                current_y=0;
+                return true;
 #else
                 return false;
 #endif
@@ -352,21 +419,92 @@ namespace wiboturn {
         // send command to motor drive
         if(abs(x)>=1 ){
             dir_x = (x>0)?CW:CCW;
-            ROS_INFO("SEND: x=%f", x);
+            printf("%sSEND: x=%f%s\n",COLOR_YELLOW, x, COLOR_RESET);
             serial_send_command( uart_fd, motor_gen_cmd_motor_drive( hori, &cmd, dir_x, motor_deg2step(hori, abs(x)), x_per.start, x_per.end, x_per.time ), sizeof(cmd_motor_drive_t) );
-            compare_count+=1;
+            mutex.lock();
+            chk_status++;
+            mutex.unlock();
         }
         if(abs(y)>=1){
             dir_y = (y>0)?CW:CCW;
-            ROS_INFO("SEND: y=%f", y);
+            printf("%sSEND: y=%f%s\n",COLOR_YELLOW, y, COLOR_RESET);
             serial_send_command( uart_fd, motor_gen_cmd_motor_drive( vert, &cmd, dir_y, motor_deg2step(vert, abs(y)), y_per.start, y_per.end, y_per.time ), sizeof(cmd_motor_drive_t) );
-            compare_count+=1;
+            mutex.lock();
+            chk_status++;
+            mutex.unlock();
         }
-
-        // Read current status
-        return readMotorResult(compare_count, &res.x_current, &res.y_current, &res.status);
+ 
+        // wait for finished
+        while(time(NULL) < endwait){
+            if(chk_status == 0){
+                if(stop_x || stop_y){
+                    if(stop_x && stop_y)
+                        res.status = STEP_STOP;
+                    else if (stop_x)
+                        res.status = STEP_STOP_X;
+                    else if (stop_y)
+                        res.status = STEP_STOP_Y;
+                }else{
+                    res.status = STEP_OK;
+                }
+                // set the current angle to service response message
+                res.x_current = current_x;
+                res.y_current = current_y;
+                printf("%s|__ RESULT => %s, current_xy(%.2f,%.2f)%s\n\n", \
+                        COLOR_YELLOW, \
+                        ((int)res.status==0)?"success":"fail", \
+                        (float)res.x_current, \
+                        (float)res.y_current, \
+                        COLOR_RESET);
+                return true;
+            }
+        }
+        // timeout
+        res.status = STEP_NG;
+        cout << COLOR_YELLOW << "timeout" << COLOR_RESET << endl;
+        return false;
     }
 
+    /**
+    * soundlocHandler
+    * request flac path to soundlocalizer java socket, and response the x angle.
+    * return the service client's request,  true if successful, otherwise false
+    */
+    bool WiboTurnNode::soundlocHandler(middleme::SoundLoc::Request  &req,
+             middleme::SoundLoc::Response &res)
+    {
+        // FLAC path name
+        string flacpath = req.flacpath;
+
+        // Sound angle
+        char angle[BUF_SIZE];
+        int ret;
+        
+        if (flacpath != "" && sockconn > 0){
+            if (access(flacpath.c_str(), F_OK ) == -1){
+                cout << COLOR_RED << "\""<<flacpath<<"\" is not exist."<<COLOR_RESET<<endl;
+                return false;
+            }
+            cout << "Receive FLAC path:" << flacpath << endl;
+
+            // socket write to sound localizer
+            write(sockconn ,flacpath.c_str(),strlen(flacpath.c_str()));
+
+            // socket read from sound localizer
+            bzero(angle, sizeof(angle));
+            if ((ret = read(sockconn , angle, BUF_SIZE)) > 0) {
+                cout << COLOR_GREEN<<"Send angle:"<< angle <<COLOR_RESET<<endl;
+                res.angle = (float)atof(angle);
+                return true;
+            }else if(ret == 0){
+                cout << COLOR_RED<<"Disconnect sockconn:"<< sockconn <<COLOR_RESET<<endl;
+            }else{
+                cout << COLOR_RED<<"Error read ret:"<< ret <<COLOR_RESET<<endl;
+            }
+        }
+        return false;
+    }
+ 
     /**
     * Destructor
     */
@@ -378,3 +516,4 @@ namespace wiboturn {
         exit(0);
     }
 }
+

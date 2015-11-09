@@ -47,13 +47,14 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate messages in the 'msg' folder
  add_message_files(
    FILES
-   SoundLoc.msg
+   Sensor.msg
  )
 
 ## Generate services in the 'srv' folder
  add_service_files(
    FILES
    MotorCtl.srv
+   SoundLoc.srv
  )
 
 ## Generate actions in the 'action' folder
@@ -130,26 +131,21 @@ link_directories(lib)
 
 ## Declare a C++ executable
  add_executable(wiboturn src/wiboturn.cpp)
- add_executable(wiboturn_demo src/wiboturn_demo.cpp)
  add_executable(wiboturn_test src/wiboturn_test.cpp)
 
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
  add_dependencies(wiboturn ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
- add_dependencies(wiboturn_demo ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
  add_dependencies(wiboturn_test ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+ add_dependencies(wiboturn_lib ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
  target_link_libraries(
    wiboturn_test
    ${catkin_LIBRARIES}
  )
- 
- target_link_libraries(
-   wiboturn_demo
-   ${catkin_LIBRARIES}
- )
+
  target_link_libraries(
    wiboturn
    wiboturn_lib
@@ -172,7 +168,7 @@ link_directories(lib)
 # )
 
 ## Mark executables and/or libraries for installation
- install(TARGETS wiboturn wiboturn_demo wiboturn_test
+ install(TARGETS wiboturn wiboturn_test
    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
